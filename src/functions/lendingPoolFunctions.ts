@@ -33,6 +33,7 @@ export type BorrowParams = {
 
 export type RepayParams = {
   loanId: bigint;
+  repayAddress: Address;
   repayAmount: bigint;
 };
 
@@ -138,6 +139,11 @@ export const repay = async (
   params: RepayParams,
 ): Promise<Hash> => {
   requirePositiveAmount(params.repayAmount, "repayAmount");
+  await allowLendingPoolSpending(
+    context,
+    params.repayAddress,
+    params.repayAmount,
+  );
 
   return context.walletClient.writeContract({
     account: context.account,
