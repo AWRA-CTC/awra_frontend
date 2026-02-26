@@ -183,6 +183,39 @@ export const LendingDashboard = () => {
       <div className="grid gap-5">
         <AppHeader />
 
+        {!hasValidLendingPoolAddress ? (
+          <section className="card-flat border-rose-300/35 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">
+            Set <code>NEXT_PUBLIC_LENDING_POOL_ADDRESS</code> in your env file
+            before submitting transactions.
+          </section>
+        ) : null}
+
+        {!hasSupportedTokens ? (
+          <section className="card-flat border-amber-300/35 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+            Set <code>NEXT_PUBLIC_SUPPORTED_TOKENS</code> in your env file with
+            token symbols, addresses, and decimals.
+          </section>
+        ) : null}
+
+        <section className="grid gap-4 lg:grid-cols-2">
+          <SuppliedTokenList
+            busy={isLoading}
+            onWithdraw={(token) => setModalState({ action: "withdraw", token })}
+          />
+          <BorrowedTokenList
+            busy={isLoading}
+            onRepay={(token, loanId) =>
+              setModalState({ action: "repay", token, loanId })
+            }
+          />
+        </section>
+
+        <TokenMarketList
+          markets={tokenMarketRows}
+          busy={isLoading}
+          onAction={(action, token) => setModalState({ action, token })}
+        />
+
         <section className="grid gap-4 lg:grid-cols-[1.35fr_1fr]">
           <article className="card p-5 sm:p-6">
             <p className="kicker">Pool Operations</p>
@@ -241,20 +274,6 @@ export const LendingDashboard = () => {
           </aside>
         </section>
 
-        {!hasValidLendingPoolAddress ? (
-          <section className="card-flat border-rose-300/35 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">
-            Set <code>NEXT_PUBLIC_LENDING_POOL_ADDRESS</code> in your env file
-            before submitting transactions.
-          </section>
-        ) : null}
-
-        {!hasSupportedTokens ? (
-          <section className="card-flat border-amber-300/35 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
-            Set <code>NEXT_PUBLIC_SUPPORTED_TOKENS</code> in your env file with
-            token symbols, addresses, and decimals.
-          </section>
-        ) : null}
-
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
             label="Supported Assets"
@@ -277,25 +296,6 @@ export const LendingDashboard = () => {
             hint="Assets currently borrowed"
           />
         </section>
-
-        <section className="grid gap-4 lg:grid-cols-2">
-          <SuppliedTokenList
-            busy={isLoading}
-            onWithdraw={(token) => setModalState({ action: "withdraw", token })}
-          />
-          <BorrowedTokenList
-            busy={isLoading}
-            onRepay={(token, loanId) =>
-              setModalState({ action: "repay", token, loanId })
-            }
-          />
-        </section>
-
-        <TokenMarketList
-          markets={tokenMarketRows}
-          busy={isLoading}
-          onAction={(action, token) => setModalState({ action, token })}
-        />
 
         <section className="card-flat px-4 py-4 text-sm sm:px-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
