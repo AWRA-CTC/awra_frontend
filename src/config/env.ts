@@ -58,6 +58,10 @@ const parseSupportedTokens = (value: string | undefined): LendingToken[] => {
   }
 };
 
+const parseMintableTokens = (value: string | undefined): LendingToken[] => {
+  return parseSupportedTokens(value);
+};
+
 const chainIdValue = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "11155111");
 
 export const env = {
@@ -73,6 +77,9 @@ export const env = {
   supportedTokens: parseSupportedTokens(
     process.env.NEXT_PUBLIC_SUPPORTED_TOKENS,
   ),
+  mintableTokens: parseMintableTokens(
+    process.env.NEXT_PUBLIC_MINTABLE_TOKENS,
+  ),
 } as const;
 
 export const hasValidLendingPoolAddress =
@@ -80,3 +87,4 @@ export const hasValidLendingPoolAddress =
 export const hasWalletConnectProjectId =
   env.walletConnectProjectId.trim().length > 0;
 export const hasSupportedTokens = env.supportedTokens.length > 0;
+export const hasMintableTokens = env.mintableTokens.length > 0;
