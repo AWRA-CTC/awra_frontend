@@ -2,9 +2,12 @@
 
 import { useMemo, useState } from "react";
 import { formatUnits, parseUnits } from "viem";
+import { useReadContracts } from "wagmi";
 import { Button } from "app/components/ui/Button";
 import { NumberInput } from "app/components/ui/NumberInput";
 import { TokenSelect } from "app/components/ui/TokenSelect";
+import { env, hasValidLendingPoolAddress } from "@/config/env";
+import { lendingPoolAbi } from "@/contracts/lendingPool";
 import { useLendingPoolContext } from "@/contexts/LendingPoolContext";
 import { formatTokenAmount } from "@/functions/formats";
 import type { LendingPoolActionRequest } from "@/hooks/useLendingPool";
@@ -42,6 +45,7 @@ const actionDescription: Record<LendingAction, string> = {
 
 const percentChoices = [10, 25, 50, 75, 100] as const;
 const BIGINT_ZERO = BigInt(0);
+const REPAY_INTEREST_BUFFER_RAW = BigInt("10000000000000000");
 
 const addressKey = (address: string) => address.toLowerCase();
 
@@ -151,6 +155,40 @@ export const ActionModal = ({
       });
   }, [token, userLoans]);
 
+  const repayInterestQuery = useReadContracts({
+    contracts: repayLoans.map((loan) => ({
+      address: env.lendingPoolAddress,
+      abi: lendingPoolAbi,
+      functionName: "interestOwed",
+      args: [loan.loanId],
+      chainId: env.chainId,
+    })),
+    query: {
+      enabled:
+        isOpen &&
+        action === "repay" &&
+        hasValidLendingPoolAddress &&
+        repayLoans.length > 0,
+    },
+  });
+
+  const repayInterestByLoanId = useMemo(() => {
+    const index = new Map<string, bigint>();
+
+    for (let i = 0; i < repayLoans.length; i += 1) {
+      const loan = repayLoans[i];
+      const queryResult = repayInterestQuery.data?.[i];
+      const interest =
+        queryResult?.status === "success"
+          ? (queryResult.result as bigint | undefined)
+          : undefined;
+
+      index.set(loan.loanId.toString(), interest ?? BIGINT_ZERO);
+    }
+
+    return index;
+  }, [repayInterestQuery.data, repayLoans]);
+
   const effectiveRepayLoanId = useMemo(() => {
     if (
       repayLoanId &&
@@ -178,7 +216,21 @@ export const ActionModal = ({
     [effectiveRepayLoanId, repayLoans],
   );
 
-  const repayOwedRaw = selectedRepayLoan?.principal ?? BIGINT_ZERO;
+  const selectedRepayInterestRaw = useMemo(() => {
+    if (!selectedRepayLoan) return BIGINT_ZERO;
+    return (
+      repayInterestByLoanId.get(selectedRepayLoan.loanId.toString()) ??
+      BIGINT_ZERO
+    );
+  }, [repayInterestByLoanId, selectedRepayLoan]);
+
+  const repayOwedRaw =
+    (selectedRepayLoan?.principal ?? BIGINT_ZERO) +
+    selectedRepayInterestRaw +
+    REPAY_INTEREST_BUFFER_RAW;
+
+  const isRepayInterestLoading =
+    action === "repay" && repayLoans.length > 0 && repayInterestQuery.isLoading;
 
   const validationError = useMemo(() => {
     if (!action || !token) return null;
@@ -195,6 +247,7 @@ export const ActionModal = ({
     if (action === "repay") {
       if (!selectedRepayLoan)
         return "No active loans found for this borrow asset.";
+      if (isRepayInterestLoading) return "Loading owed amount...";
       if (!amount.trim()) return null;
 
       const parsedAmount = parsePositiveUnits(amount, token.decimals);
@@ -231,6 +284,7 @@ export const ActionModal = ({
     borrowAmount,
     borrowCollateralAmount,
     repayOwedRaw,
+    isRepayInterestLoading,
     selectedCollateralToken?.decimals,
     selectedRepayLoan,
     suppliedAmountRaw,
@@ -256,7 +310,7 @@ export const ActionModal = ({
       );
     }
 
-    return !amount.trim() || !selectedRepayLoan;
+    return !amount.trim() || !selectedRepayLoan || isRepayInterestLoading;
   }, [
     action,
     amount,
@@ -264,6 +318,7 @@ export const ActionModal = ({
     effectiveBorrowCollateralAddress,
     borrowCollateralAmount,
     busy,
+    isRepayInterestLoading,
     selectedRepayLoan,
     suppliedAmountRaw,
     token,
@@ -418,9 +473,13 @@ export const ActionModal = ({
               options={repayLoans.map((loan) => ({
                 value: loan.loanId.toString(),
                 label: `Loan #${loan.loanId.toString()}`,
-                hint: `Owes ${formatTokenAmount(loan.principal, token.decimals)} ${
-                  token.symbol
-                }`,
+                hint: `Owes ${formatTokenAmount(
+                  loan.principal +
+                    (repayInterestByLoanId.get(loan.loanId.toString()) ??
+                      BIGINT_ZERO) +
+                    REPAY_INTEREST_BUFFER_RAW,
+                  token.decimals,
+                )} ${token.symbol}`,
               }))}
               disabled={busy || repayLoans.length === 0}
               onChange={setRepayLoanId}
@@ -431,6 +490,11 @@ export const ActionModal = ({
                 {repayOwedText} {token.symbol}
               </span>
             </p>
+            {isRepayInterestLoading ? (
+              <p className="text-xs text-slate-300">
+                Loading interest from lending pool...
+              </p>
+            ) : null}
             <div className="flex flex-wrap gap-2">
               {percentChoices.map((percent) => (
                 <Button
