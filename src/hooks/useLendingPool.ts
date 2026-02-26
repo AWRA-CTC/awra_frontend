@@ -3,25 +3,35 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   useAccount,
+  useChainId,
+  useConnectorClient,
+  usePublicClient,
   useReadContracts,
   useWaitForTransactionReceipt,
-  useWriteContract,
+  useWalletClient,
 } from "wagmi";
-import { erc20Abi, formatUnits, parseUnits, zeroAddress, type Hash } from "viem";
+import {
+  walletActions,
+  erc20Abi,
+  formatUnits,
+  parseUnits,
+  zeroAddress,
+  type Hash,
+} from "viem";
 import {
   env,
   hasSupportedTokens,
   hasValidLendingPoolAddress,
 } from "@/config/env";
 import { lendingPoolAbi } from "@/contracts/lendingPool";
-import type { LendingAction, LendingToken } from "@/types/lending";
-
-const actionToFunctionName: Record<LendingAction, "deposit" | "borrow" | "repay" | "withdraw"> = {
-  deposit: "deposit",
-  borrow: "borrow",
-  repay: "repay",
-  withdraw: "withdraw",
-};
+import {
+  borrow as borrowFromPool,
+  deposit as depositToPool,
+  repay as repayToPool,
+  withdraw as withdrawFromPool,
+  type LendingPoolCallContext,
+} from "@/functions/lendingPoolFunctions";
+import type { LendingToken } from "@/types/lending";
 
 const BIGINT_ZERO = BigInt(0);
 
@@ -31,6 +41,22 @@ const formatTokenAmount = (value: bigint | undefined, decimals = 18) => {
   const num = Number(formatUnits(value, decimals));
   if (Number.isNaN(num)) return "0";
   return num.toLocaleString(undefined, { maximumFractionDigits: 4 });
+};
+
+const parsePositiveUnits = (input: string, decimals: number): bigint | null => {
+  const normalized = input.trim();
+  if (!normalized) return null;
+
+  const amount = Number(normalized);
+  if (Number.isNaN(amount) || amount <= 0) return null;
+
+  try {
+    const parsed = parseUnits(normalized, decimals);
+    if (parsed <= BIGINT_ZERO) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
 };
 
 type TokenMarket = LendingToken & {
@@ -43,12 +69,41 @@ type TokenMarket = LendingToken & {
   hasDebt: boolean;
 };
 
+export type LendingPoolActionRequest =
+  | {
+      action: "deposit";
+      token: LendingToken;
+      amountInput: string;
+    }
+  | {
+      action: "withdraw";
+      token: LendingToken;
+      amountInput: string;
+    }
+  | {
+      action: "borrow";
+      borrowToken: LendingToken;
+      collateralToken: LendingToken;
+      collateralAmountInput: string;
+      borrowAmountInput: string;
+    }
+  | {
+      action: "repay";
+      token: LendingToken;
+      loanId: bigint;
+      amountInput: string;
+    };
+
 export const useLendingPool = () => {
   const [txHash, setTxHash] = useState<Hash | undefined>();
   const [actionError, setActionError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const { address, isConnected } = useAccount();
-  const { writeContractAsync, isPending: isWriting } = useWriteContract();
+  const activeChainId = useChainId();
+  const { data: walletClient } = useWalletClient();
+  const { data: connectorClient } = useConnectorClient();
+  const publicClient = usePublicClient({ chainId: env.chainId });
 
   const walletTokenBalanceQuery = useReadContracts({
     contracts: env.supportedTokens.map((token) => ({
@@ -81,7 +136,8 @@ export const useLendingPool = () => {
       chainId: env.chainId,
     })),
     query: {
-      enabled: hasValidLendingPoolAddress && Boolean(address) && hasSupportedTokens,
+      enabled:
+        hasValidLendingPoolAddress && Boolean(address) && hasSupportedTokens,
     },
   });
 
@@ -103,50 +159,177 @@ export const useLendingPool = () => {
     userPositionQuery,
   ]);
 
-  const executeAction = async (
-    action: LendingAction,
-    token: LendingToken,
-    amountInput: string,
-  ): Promise<boolean> => {
-    setActionError(null);
-
+  const buildCallContext = (): LendingPoolCallContext | null => {
     if (!isConnected || !address) {
       setActionError("Connect your wallet first.");
-      return false;
+      return null;
     }
 
     if (!hasValidLendingPoolAddress) {
       setActionError("Set NEXT_PUBLIC_LENDING_POOL_ADDRESS in your env.");
+      return null;
+    }
+
+    if (activeChainId !== env.chainId) {
+      setActionError(
+        `Switch wallet network to chain ID ${env.chainId} and try again.`,
+      );
+      return null;
+    }
+
+    const signerClient =
+      walletClient ??
+      (connectorClient ? connectorClient.extend(walletActions) : undefined);
+
+    if (!signerClient || !publicClient) {
+      setActionError("Wallet client is not ready yet. Try again.");
+      return null;
+    }
+
+    return {
+      account: address,
+      lendingPoolAddress: env.lendingPoolAddress,
+      publicClient,
+      walletClient: signerClient,
+    };
+  };
+
+  const executeAction = async (
+    request: LendingPoolActionRequest,
+  ): Promise<boolean> => {
+    setActionError(null);
+
+    const callContext = buildCallContext();
+    if (!callContext) {
       return false;
     }
 
-    if (!token.address || token.address === zeroAddress) {
-      setActionError("Select a valid asset token first.");
-      return false;
-    }
-
-    const normalized = amountInput.trim();
-    const amount = Number(normalized);
-    if (!normalized || Number.isNaN(amount) || amount <= 0) {
-      setActionError("Enter a valid amount greater than zero.");
-      return false;
-    }
+    setIsSubmitting(true);
 
     try {
-      const value = parseUnits(normalized, token.decimals);
-      const hash = await writeContractAsync({
-        address: env.lendingPoolAddress,
-        abi: lendingPoolAbi,
-        functionName: actionToFunctionName[action],
-        args: [token.address, value],
-        chainId: env.chainId,
-      });
+      let hash: Hash;
+
+      switch (request.action) {
+        case "deposit": {
+          if (!request.token.address || request.token.address === zeroAddress) {
+            setActionError("Select a valid asset token first.");
+            return false;
+          }
+
+          const amount = parsePositiveUnits(
+            request.amountInput,
+            request.token.decimals,
+          );
+          if (amount === null) {
+            setActionError("Enter a valid amount greater than zero.");
+            return false;
+          }
+
+          hash = await depositToPool(callContext, {
+            asset: request.token.address,
+            amount,
+          });
+          break;
+        }
+        case "withdraw": {
+          if (!request.token.address || request.token.address === zeroAddress) {
+            setActionError("Select a valid asset token first.");
+            return false;
+          }
+
+          const amount = parsePositiveUnits(
+            request.amountInput,
+            request.token.decimals,
+          );
+          if (amount === null) {
+            setActionError("Enter a valid amount greater than zero.");
+            return false;
+          }
+
+          hash = await withdrawFromPool(callContext, {
+            asset: request.token.address,
+            aTokenAmount: amount,
+          });
+          break;
+        }
+        case "borrow": {
+          if (
+            !request.borrowToken.address ||
+            request.borrowToken.address === zeroAddress
+          ) {
+            setActionError("Select a valid borrow asset first.");
+            return false;
+          }
+
+          if (
+            !request.collateralToken.address ||
+            request.collateralToken.address === zeroAddress
+          ) {
+            setActionError("Select a valid collateral asset first.");
+            return false;
+          }
+
+          const collateralAmount = parsePositiveUnits(
+            request.collateralAmountInput,
+            request.collateralToken.decimals,
+          );
+          if (collateralAmount === null) {
+            setActionError(
+              "Enter a valid collateral amount greater than zero.",
+            );
+            return false;
+          }
+
+          const borrowAmount = parsePositiveUnits(
+            request.borrowAmountInput,
+            request.borrowToken.decimals,
+          );
+          if (borrowAmount === null) {
+            setActionError("Enter a valid borrow amount greater than zero.");
+            return false;
+          }
+
+          hash = await borrowFromPool(callContext, {
+            collateralAsset: request.collateralToken.address,
+            borrowAsset: request.borrowToken.address,
+            collateralAmount,
+            borrowAmount,
+          });
+          break;
+        }
+        case "repay": {
+          if (!request.token.address || request.token.address === zeroAddress) {
+            setActionError("Select a valid repay asset token first.");
+            return false;
+          }
+          const repayAddress = request.token.address;
+          const repayAmount = parsePositiveUnits(
+            request.amountInput,
+            request.token.decimals,
+          );
+          if (repayAmount === null) {
+            setActionError("Enter a valid repay amount greater than zero.");
+            return false;
+          }
+
+          hash = await repayToPool(callContext, {
+            loanId: request.loanId,
+            repayAddress,
+            repayAmount,
+          });
+          break;
+        }
+      }
+
       setTxHash(hash);
       return true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : `Transaction failed for ${token.symbol}.`;
+      const message =
+        error instanceof Error ? error.message : "Transaction failed.";
       setActionError(message);
       return false;
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -194,14 +377,18 @@ export const useLendingPool = () => {
   const summary = useMemo(
     () => ({
       supportedAssets: String(tokenMarkets.length),
-      walletAssetCount: String(tokenMarkets.filter((token) => token.hasWalletBalance).length),
-      collateralMarkets: String(tokenMarkets.filter((token) => token.hasCollateral).length),
+      walletAssetCount: String(
+        tokenMarkets.filter((token) => token.hasWalletBalance).length,
+      ),
+      collateralMarkets: String(
+        tokenMarkets.filter((token) => token.hasCollateral).length,
+      ),
       debtMarkets: String(tokenMarkets.filter((token) => token.hasDebt).length),
     }),
     [tokenMarkets],
   );
 
-  const isLoading = isWriting || txReceipt.isLoading;
+  const isLoading = isSubmitting || txReceipt.isLoading;
 
   return {
     address,
@@ -215,4 +402,3 @@ export const useLendingPool = () => {
     executeAction,
   };
 };
-
