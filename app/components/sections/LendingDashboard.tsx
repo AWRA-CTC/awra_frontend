@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ActionModal } from "app/components/lending/ActionModal";
+import { BorrowedTokenList } from "app/components/lending/BorrowedTokenList";
 import { StatCard } from "app/components/lending/StatCard";
+import { SuppliedTokenList } from "app/components/lending/SuppliedTokenList";
 import { TokenMarketList } from "app/components/lending/TokenMarketList";
-import { Button } from "app/components/ui/Button";
 import { AppHeader } from "app/components/layout/AppHeader";
-import { formatUnits } from "viem";
 import {
   hasSupportedTokens,
   hasValidLendingPoolAddress,
@@ -15,47 +15,19 @@ import {
 import { useLendingPoolContext } from "@/contexts/LendingPoolContext";
 import { useLendingPool } from "@/hooks/useLendingPool";
 import type { LendingAction, LendingToken } from "@/types/lending";
-
-const truncate = (value: string, head = 10, tail = 8) => {
-  if (value.length <= head + tail) return value;
-  return `${value.slice(0, head)}...${value.slice(-tail)}`;
-};
-
-const formatTokenAmount = (value: bigint, decimals = 18) => {
-  const amount = Number(formatUnits(value, decimals));
-  if (Number.isNaN(amount)) return "0";
-  return amount.toLocaleString(undefined, { maximumFractionDigits: 4 });
-};
-
-const formatAprFromBasisPoints = (apr: bigint) => {
-  const percent = Number(apr) / 100;
-  if (!Number.isFinite(percent)) return `${apr.toString()} bps`;
-  return `${percent.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}%`;
-};
-
-const formatLoanStart = (timestamp: bigint) => {
-  if (timestamp <= 0n) return "N/A";
-  const milliseconds = Number(timestamp) * 1000;
-  if (!Number.isFinite(milliseconds)) return "N/A";
-  return new Date(milliseconds).toLocaleString();
-};
+import { truncate } from "@/functions/formats";
 
 export const LendingDashboard = () => {
   const [modalState, setModalState] = useState<{
     action: LendingAction;
     token: LendingToken;
+    loanId?: bigint;
   } | null>(null);
+  const [isAwaitingModalResult, setIsAwaitingModalResult] = useState(false);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const {
-    supportedTokens,
     assetConfigs,
-    lendTokenBalances,
-    userDeposits,
-    userLoanIds,
-    userLoans,
     isLoading: contextLoading,
     error: contextError,
     refresh,
@@ -76,28 +48,6 @@ export const LendingDashboard = () => {
     void refresh();
   }, [refresh]);
 
-  useEffect(() => {
-    console.log("LendingPoolContext Results:", {
-      supportedTokens,
-      assetConfigs,
-      lendTokenBalances,
-      userDeposits,
-      userLoanIds,
-      userLoans,
-      isLoading: contextLoading,
-      error: contextError,
-    });
-  }, [
-    supportedTokens,
-    assetConfigs,
-    lendTokenBalances,
-    userDeposits,
-    userLoanIds,
-    userLoans,
-    contextLoading,
-    contextError,
-  ]);
-
   const contractStatus = hasValidLendingPoolAddress
     ? "Contract ready"
     : "Contract missing";
@@ -117,14 +67,6 @@ export const LendingDashboard = () => {
 
     return labels[modalState.action];
   }, [modalState]);
-
-  const tokenByAddress = useMemo(() => {
-    const index = new Map<string, LendingToken>();
-    for (const token of supportedTokens) {
-      index.set(token.address.toLowerCase(), token);
-    }
-    return index;
-  }, [supportedTokens]);
 
   const assetConfigByAddress = useMemo(() => {
     const index = new Map<
@@ -153,55 +95,88 @@ export const LendingDashboard = () => {
     [assetConfigByAddress, tokenMarkets],
   );
 
-  const suppliedPositions = useMemo(
-    () =>
-      lendTokenBalances
-        .filter((position) => position.hasBalance)
-        .map((position) => {
-          const token = tokenByAddress.get(position.asset.toLowerCase());
+  const walletBalanceByAddress = useMemo(() => {
+    const index = new Map<string, string>();
+    for (const market of tokenMarketRows) {
+      index.set(market.address.toLowerCase(), market.walletBalance);
+    }
+    return index;
+  }, [tokenMarketRows]);
 
-          return {
-            key: position.asset.toLowerCase(),
-            token,
-            symbol: token?.symbol ?? position.assetSymbol,
-            name: token?.name ?? `${position.assetSymbol} Lend Token`,
-            amount: formatTokenAmount(position.balance, token?.decimals ?? 18),
-          };
-        }),
-    [lendTokenBalances, tokenByAddress],
-  );
+  const modalWalletBalance = useMemo(() => {
+    if (!modalState) return "0";
+    return (
+      walletBalanceByAddress.get(modalState.token.address.toLowerCase()) ?? "0"
+    );
+  }, [modalState, walletBalanceByAddress]);
 
-  const borrowedPositions = useMemo(
-    () =>
-      userLoans
-        .filter((loan) => loan.active && loan.principal > 0n)
-        .map((loan) => {
-          const borrowToken = tokenByAddress.get(loan.borrowAsset.toLowerCase());
-          const collateralToken = tokenByAddress.get(
-            loan.collateralAsset.toLowerCase(),
-          );
+  const closeModal = () => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
 
-          return {
-            loanId: loan.loanId.toString(),
-            repayToken: borrowToken ?? null,
-            borrowSymbol: borrowToken?.symbol ?? truncate(loan.borrowAsset),
-            borrowAmount: formatTokenAmount(
-              loan.principal,
-              borrowToken?.decimals ?? 18,
-            ),
-            collateralSymbol:
-              collateralToken?.symbol ?? truncate(loan.collateralAsset),
-            collateralAmount: formatTokenAmount(
-              loan.collateral,
-              collateralToken?.decimals ?? 18,
-            ),
-            aprPercent: formatAprFromBasisPoints(loan.apr),
-            aprBps: loan.apr.toString(),
-            startedAt: formatLoanStart(loan.startTime),
-          };
-        }),
-    [tokenByAddress, userLoans],
-  );
+    setModalState(null);
+    setIsAwaitingModalResult(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current) {
+        clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!modalState || !isAwaitingModalResult) return;
+
+    const hasResult =
+      txStatus === "success" || txStatus === "error" || Boolean(actionError);
+    if (!hasResult) {
+      return;
+    }
+
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+    }
+
+    const delay = txStatus === "success" ? 1200 : actionError ? 2000 : 1600;
+    closeTimerRef.current = setTimeout(() => {
+      closeModal();
+    }, delay);
+  }, [actionError, isAwaitingModalResult, modalState, txStatus]);
+
+  const modalStatus = useMemo(() => {
+    if (!isAwaitingModalResult) return null;
+
+    if (txStatus === "success") {
+      return {
+        tone: "success" as const,
+        message: "Transaction confirmed. Closing modal...",
+      };
+    }
+
+    if (txStatus === "error") {
+      return {
+        tone: "error" as const,
+        message: "Transaction failed. Closing modal...",
+      };
+    }
+
+    if (actionError) {
+      return {
+        tone: "error" as const,
+        message: actionError,
+      };
+    }
+
+    return {
+      tone: "processing" as const,
+      message: "Processing transaction...",
+    };
+  }, [actionError, isAwaitingModalResult, txStatus]);
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-5 sm:px-6 sm:py-8">
@@ -304,129 +279,16 @@ export const LendingDashboard = () => {
         </section>
 
         <section className="grid gap-4 lg:grid-cols-2">
-          <article className="card-flat px-4 py-4 sm:px-5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="section-title text-white">Supplied Tokens</h3>
-              <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-xs text-slate-200">
-                {suppliedPositions.length} active
-              </span>
-            </div>
-
-            {suppliedPositions.length === 0 ? (
-              <p className="subtle mt-3 text-sm">
-                No supplied positions yet. Use Supply on a token market row.
-              </p>
-            ) : (
-              <div className="mt-3 space-y-2">
-                {suppliedPositions.map((position) => (
-                  <div
-                    key={position.key}
-                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/25 px-3 py-2.5"
-                  >
-                    <div>
-                      <p className="text-sm font-medium text-white">
-                        {position.symbol}
-                      </p>
-                      <p className="subtle text-xs">{position.name}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <p className="balance-text text-sm text-white">
-                        {position.amount} {position.symbol}
-                      </p>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        disabled={isLoading || !position.token}
-                        onClick={() => {
-                          if (!position.token) return;
-                          setModalState({
-                            action: "withdraw",
-                            token: position.token,
-                          });
-                        }}
-                      >
-                        Withdraw
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </article>
-
-          <article className="card-flat px-4 py-4 sm:px-5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="section-title text-white">Borrowed Tokens</h3>
-              <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-xs text-slate-200">
-                {borrowedPositions.length} active loans
-              </span>
-            </div>
-
-            {borrowedPositions.length === 0 ? (
-              <p className="subtle mt-3 text-sm">
-                No active borrowed positions yet. Borrow against collateral from
-                a token market row.
-              </p>
-            ) : (
-              <div className="mt-3 space-y-2">
-                {borrowedPositions.map((position) => (
-                  <div
-                    key={position.loanId}
-                    className="rounded-xl border border-white/10 bg-black/25 px-3 py-2.5"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-medium text-white">
-                        {position.borrowSymbol}
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <p className="text-xs text-sky-100">
-                          APR {position.aprPercent} ({position.aprBps} bps)
-                        </p>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          disabled={isLoading || !position.repayToken}
-                          onClick={() => {
-                            if (!position.repayToken) return;
-                            setModalState({
-                              action: "repay",
-                              token: position.repayToken,
-                            });
-                          }}
-                        >
-                          Repay
-                        </Button>
-                      </div>
-                    </div>
-                    <div className="mt-2 grid gap-1 text-xs sm:grid-cols-2">
-                      <p className="subtle">
-                        Borrowed:{" "}
-                        <span className="balance-text text-slate-100">
-                          {position.borrowAmount} {position.borrowSymbol}
-                        </span>
-                      </p>
-                      <p className="subtle">
-                        Collateral:{" "}
-                        <span className="balance-text text-slate-100">
-                          {position.collateralAmount} {position.collateralSymbol}
-                        </span>
-                      </p>
-                      <p className="subtle">
-                        Loan ID:{" "}
-                        <span className="font-mono text-slate-100">
-                          {position.loanId}
-                        </span>
-                      </p>
-                      <p className="subtle">
-                        Started:{" "}
-                        <span className="text-slate-100">{position.startedAt}</span>
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </article>
+          <SuppliedTokenList
+            busy={isLoading}
+            onWithdraw={(token) => setModalState({ action: "withdraw", token })}
+          />
+          <BorrowedTokenList
+            busy={isLoading}
+            onRepay={(token, loanId) =>
+              setModalState({ action: "repay", token, loanId })
+            }
+          />
         </section>
 
         <TokenMarketList
@@ -475,26 +337,26 @@ export const LendingDashboard = () => {
       <ActionModal
         key={
           modalState
-            ? `${modalState.action}-${modalState.token.address}`
+            ? `${modalState.action}-${modalState.token.address}-${modalState.loanId?.toString() ?? "none"}`
             : "closed-modal"
         }
         isOpen={modalState !== null}
         action={modalState?.action ?? null}
         token={modalState?.token ?? null}
-        busy={isLoading}
-        error={actionError}
-        onClose={() => setModalState(null)}
-        onConfirm={async (amount) => {
+        busy={isLoading || isAwaitingModalResult}
+        error={isAwaitingModalResult ? null : actionError}
+        statusMessage={modalStatus?.message ?? null}
+        statusTone={modalStatus?.tone ?? null}
+        walletBalance={modalWalletBalance}
+        preferredLoanId={modalState?.loanId ?? null}
+        onClose={closeModal}
+        onConfirm={async (payload) => {
           if (!modalState) return;
 
-          const submitted = await executeAction(
-            modalState.action,
-            modalState.token,
-            amount,
-          );
+          const submitted = await executeAction(payload);
 
           if (submitted) {
-            setModalState(null);
+            setIsAwaitingModalResult(true);
           }
         }}
       />
