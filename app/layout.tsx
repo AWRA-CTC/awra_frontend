@@ -9,8 +9,9 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "AWRA Lending",
-  description: "DeFi lending and borrowing interface",
+  title: "AWRA | Agentic DeFi Lending Protocol",
+  description:
+    "AWRA combines credit-based APR with AI-powered risk monitoring for decentralized lending.",
 };
 
 export default function RootLayout({

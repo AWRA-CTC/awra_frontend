@@ -30,6 +30,10 @@ body {
   min-height: 100%;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   margin: 0;
   color: var(--text);
@@ -116,5 +120,149 @@ body {
 
   .section-title {
     font-size: 1rem;
+  }
+}
+
+.marketing-shell {
+  position: relative;
+}
+
+.awra-panel {
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  background: linear-gradient(
+    158deg,
+    rgba(255, 255, 255, 0.06),
+    rgba(255, 255, 255, 0.02)
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 18px 44px rgba(0, 0, 0, 0.35);
+}
+
+.awra-hero-backdrop {
+  position: absolute;
+  inset: -30% -10% auto;
+  height: 36rem;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      32rem 18rem at 22% 36%,
+      rgba(255, 58, 70, 0.22),
+      transparent 72%
+    ),
+    radial-gradient(
+      32rem 18rem at 76% 20%,
+      rgba(100, 208, 255, 0.16),
+      transparent 72%
+    );
+  filter: blur(14px);
+  animation: awra-glow 10s ease-in-out infinite alternate;
+}
+
+.awra-icon-wrap {
+  display: inline-flex;
+  height: 2.2rem;
+  width: 2.2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.05);
+  color: #ffbac0;
+}
+
+.awra-avatar {
+  display: inline-flex;
+  height: 2.8rem;
+  width: 2.8rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background:
+    radial-gradient(
+      circle at 30% 24%,
+      rgba(255, 58, 70, 0.65),
+      rgba(255, 58, 70, 0.14) 70%
+    ),
+    rgba(0, 0, 0, 0.35);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: white;
+}
+
+.awra-logo-glow {
+  filter:
+    drop-shadow(0 0 24px rgba(255, 58, 70, 0.72))
+    drop-shadow(0 0 58px rgba(255, 58, 70, 0.42));
+  animation: awra-logo-float 7s ease-in-out infinite alternate;
+}
+
+.docs-prose {
+  max-width: 100%;
+}
+
+.docs-prose section + section {
+  margin-top: 2rem;
+}
+
+.docs-prose h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: white;
+}
+
+.docs-prose p {
+  margin-top: 0.95rem;
+  max-width: 72ch;
+  color: rgba(243, 245, 247, 0.72);
+  line-height: 1.75;
+}
+
+.docs-prose pre {
+  margin-top: 1rem;
+  overflow-x: auto;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.17);
+  background: rgba(4, 7, 11, 0.86);
+  padding: 0.95rem 1rem;
+}
+
+.docs-prose code {
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: rgba(212, 238, 255, 0.92);
+}
+
+@keyframes awra-glow {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.65;
+  }
+  to {
+    transform: translate3d(0, 16px, 0) scale(1.05);
+    opacity: 0.95;
+  }
+}
+
+@keyframes awra-logo-float {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(0, -8px, 0) scale(1.02);
   }
 }
