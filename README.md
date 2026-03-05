@@ -25,6 +25,7 @@ Create a `.env` file (or copy from `.env.example`) and set:
 - `NEXT_PUBLIC_CTC_TESTNET_RPC_URL`
 - `NEXT_PUBLIC_LENDING_POOL_ADDRESS`
 - `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`
+- `NEXT_PUBLIC_NOTIFICATION_SUBSCRIPTION_URL`
 - `NEXT_PUBLIC_SUPPORTED_TOKENS`
 - `NEXT_PUBLIC_MINTABLE_TOKENS`
 
@@ -34,6 +35,12 @@ Create a `.env` file (or copy from `.env.example`) and set:
 - `name`
 - `address`
 - `decimals`
+
+`NEXT_PUBLIC_NOTIFICATION_SUBSCRIPTION_URL` should point to your backend endpoint that accepts:
+
+- `walletAddress` (string)
+- `email` (string)
+- `loanId` (string)
 
 ## Run Locally
 

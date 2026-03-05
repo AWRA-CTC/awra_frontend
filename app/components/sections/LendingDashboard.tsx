@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { Address } from "viem";
+import { usePublicClient } from "wagmi";
 import { ActionModal } from "app/components/lending/ActionModal";
 import { BorrowedTokenList } from "app/components/lending/BorrowedTokenList";
 import { StatCard } from "app/components/lending/StatCard";
 import { SuppliedTokenList } from "app/components/lending/SuppliedTokenList";
 import { TokenMarketList } from "app/components/lending/TokenMarketList";
 import { AppHeader } from "app/components/layout/AppHeader";
+import { lendingPoolAbi } from "@/contracts/lendingPool";
 import {
   hasSupportedTokens,
   hasValidLendingPoolAddress,
@@ -16,6 +19,20 @@ import { useLendingPoolContext } from "@/contexts/LendingPoolContext";
 import { useLendingPool } from "@/hooks/useLendingPool";
 import type { LendingAction, LendingToken } from "@/types/lending";
 import { truncate } from "@/functions/formats";
+import { saveBorrowNotificationSubscription } from "@/functions/notificationSubscriptions";
+
+type NotificationTone = "processing" | "success" | "error";
+
+type BorrowNotificationIntent = {
+  walletAddress: Address;
+  email: string;
+  previousLoanIds: string[];
+};
+
+type NotificationStatus = {
+  tone: NotificationTone;
+  message: string;
+};
 
 export const LendingDashboard = () => {
   const [modalState, setModalState] = useState<{
@@ -24,16 +41,24 @@ export const LendingDashboard = () => {
     loanId?: bigint;
   } | null>(null);
   const [isAwaitingModalResult, setIsAwaitingModalResult] = useState(false);
+  const [pendingBorrowNotification, setPendingBorrowNotification] =
+    useState<BorrowNotificationIntent | null>(null);
+  const [notificationStatus, setNotificationStatus] =
+    useState<NotificationStatus | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isSavingNotificationRef = useRef(false);
+  const publicClient = usePublicClient({ chainId: env.chainId });
 
   const {
     assetConfigs,
+    userLoanIds,
     isLoading: contextLoading,
     error: contextError,
     refresh,
   } = useLendingPoolContext();
 
   const {
+    address,
     isConnected,
     txHash,
     txStatus,
@@ -177,6 +202,99 @@ export const LendingDashboard = () => {
       message: "Processing transaction...",
     };
   }, [actionError, isAwaitingModalResult, txStatus]);
+
+  useEffect(() => {
+    if (!pendingBorrowNotification) return;
+
+    if (txStatus === "error" || actionError) {
+      setNotificationStatus({
+        tone: "error",
+        message: "Borrow failed, so notification subscription was not saved.",
+      });
+      setPendingBorrowNotification(null);
+      return;
+    }
+
+    if (txStatus !== "success") return;
+    if (!publicClient) {
+      setNotificationStatus({
+        tone: "error",
+        message: "Public client is unavailable. Could not save notification subscription.",
+      });
+      setPendingBorrowNotification(null);
+      return;
+    }
+    if (isSavingNotificationRef.current) return;
+
+    isSavingNotificationRef.current = true;
+    let isCancelled = false;
+
+    const persistBorrowSubscription = async () => {
+      try {
+        setNotificationStatus({
+          tone: "processing",
+          message: "Saving notification subscription...",
+        });
+
+        const latestLoanIds = (await publicClient.readContract({
+          address: env.lendingPoolAddress,
+          abi: lendingPoolAbi,
+          functionName: "getUserLoanIds",
+          args: [pendingBorrowNotification.walletAddress],
+        })) as bigint[];
+
+        const previousLoanIds = new Set(pendingBorrowNotification.previousLoanIds);
+        const createdLoanIdByDiff = latestLoanIds.find(
+          (loanId) => !previousLoanIds.has(loanId.toString()),
+        );
+        const latestLoanId =
+          latestLoanIds.length > 0
+            ? latestLoanIds.reduce((currentMax, loanId) =>
+                loanId > currentMax ? loanId : currentMax,
+              )
+            : null;
+        const createdLoanId = createdLoanIdByDiff ?? latestLoanId;
+
+        if (!createdLoanId) {
+          throw new Error("Could not resolve the new loan ID for this borrow.");
+        }
+
+        await saveBorrowNotificationSubscription({
+          walletAddress: pendingBorrowNotification.walletAddress,
+          email: pendingBorrowNotification.email,
+          loanId: createdLoanId.toString(),
+        });
+
+        if (!isCancelled) {
+          setNotificationStatus({
+            tone: "success",
+            message: "Email notifications enabled for the new loan.",
+          });
+        }
+      } catch (cause) {
+        if (!isCancelled) {
+          setNotificationStatus({
+            tone: "error",
+            message:
+              cause instanceof Error
+                ? cause.message
+                : "Failed to save notification subscription.",
+          });
+        }
+      } finally {
+        isSavingNotificationRef.current = false;
+        if (!isCancelled) {
+          setPendingBorrowNotification(null);
+        }
+      }
+    };
+
+    void persistBorrowSubscription();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [actionError, pendingBorrowNotification, publicClient, txStatus]);
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-5 sm:px-6 sm:py-8">
@@ -331,6 +449,19 @@ export const LendingDashboard = () => {
               Lending pool context error: {contextError}
             </p>
           ) : null}
+          {notificationStatus ? (
+            <p
+              className={`mt-2 ${
+                notificationStatus.tone === "success"
+                  ? "text-emerald-300"
+                  : notificationStatus.tone === "error"
+                    ? "text-rose-300"
+                    : "text-sky-200"
+              }`}
+            >
+              {notificationStatus.message}
+            </p>
+          ) : null}
         </section>
       </div>
 
@@ -353,10 +484,59 @@ export const LendingDashboard = () => {
         onConfirm={async (payload) => {
           if (!modalState) return;
 
+          setNotificationStatus(null);
+          setPendingBorrowNotification(null);
+
+          let notificationIntent: BorrowNotificationIntent | null = null;
+          if (
+            payload.action === "borrow" &&
+            payload.notificationEmail?.trim() &&
+            address
+          ) {
+            let previousLoanIdsRaw = userLoanIds;
+            if (publicClient) {
+              try {
+                previousLoanIdsRaw = (await publicClient.readContract({
+                  address: env.lendingPoolAddress,
+                  abi: lendingPoolAbi,
+                  functionName: "getUserLoanIds",
+                  args: [address],
+                })) as bigint[];
+              } catch {
+                previousLoanIdsRaw = userLoanIds;
+              }
+            }
+
+            notificationIntent = {
+              walletAddress: address,
+              email: payload.notificationEmail.trim(),
+              previousLoanIds: previousLoanIdsRaw.map((loanId) =>
+                loanId.toString(),
+              ),
+            };
+          }
+
           const submitted = await executeAction(payload);
 
           if (submitted) {
             setIsAwaitingModalResult(true);
+            if (notificationIntent) {
+              setPendingBorrowNotification(notificationIntent);
+              setNotificationStatus({
+                tone: "processing",
+                message:
+                  "Borrow submitted. Email subscription will be saved after confirmation.",
+              });
+            }
+            return;
+          }
+
+          if (notificationIntent) {
+            setNotificationStatus({
+              tone: "error",
+              message:
+                "Borrow was not submitted, so email subscription was not saved.",
+            });
           }
         }}
       />

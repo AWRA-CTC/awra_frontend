@@ -86,6 +86,7 @@ export type LendingPoolActionRequest =
       collateralToken: LendingToken;
       collateralAmountInput: string;
       borrowAmountInput: string;
+      notificationEmail?: string;
     }
   | {
       action: "repay";

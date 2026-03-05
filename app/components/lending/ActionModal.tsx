@@ -46,6 +46,7 @@ const actionDescription: Record<LendingAction, string> = {
 const percentChoices = [10, 25, 50, 75, 100] as const;
 const BIGINT_ZERO = BigInt(0);
 const REPAY_INTEREST_BUFFER_RAW = BigInt("10000000000000000");
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const addressKey = (address: string) => address.toLowerCase();
 
@@ -92,6 +93,9 @@ export const ActionModal = ({
   const [borrowCollateralAmount, setBorrowCollateralAmount] = useState("");
   const [borrowAmount, setBorrowAmount] = useState("");
   const [repayLoanId, setRepayLoanId] = useState("");
+  const [wantsBorrowNotifications, setWantsBorrowNotifications] =
+    useState(false);
+  const [notificationEmail, setNotificationEmail] = useState("");
 
   const title = useMemo(() => {
     if (!action || !token) return "Action";
@@ -275,6 +279,16 @@ export const ActionModal = ({
           return "Enter a valid borrow amount greater than zero.";
         }
       }
+
+      if (wantsBorrowNotifications) {
+        const normalizedEmail = notificationEmail.trim();
+        if (!normalizedEmail) {
+          return "Enter an email to receive borrow notifications.";
+        }
+        if (!EMAIL_PATTERN.test(normalizedEmail)) {
+          return "Enter a valid email address.";
+        }
+      }
     }
 
     return null;
@@ -283,12 +297,14 @@ export const ActionModal = ({
     amount,
     borrowAmount,
     borrowCollateralAmount,
+    notificationEmail,
     repayOwedRaw,
     isRepayInterestLoading,
     selectedCollateralToken?.decimals,
     selectedRepayLoan,
     suppliedAmountRaw,
     token,
+    wantsBorrowNotifications,
   ]);
 
   const submitDisabled = useMemo(() => {
@@ -462,6 +478,37 @@ export const ActionModal = ({
                 No collateral assets are configured for this pool.
               </p>
             ) : null}
+            <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-3">
+              <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-100">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 rounded border-white/25 bg-black/30 text-rose-400 focus:ring-rose-300/40"
+                  checked={wantsBorrowNotifications}
+                  onChange={(event) =>
+                    setWantsBorrowNotifications(event.target.checked)
+                  }
+                />
+                <span>
+                  Email me updates for this loan (payment reminders and risk
+                  alerts).
+                </span>
+              </label>
+              {wantsBorrowNotifications ? (
+                <label className="mt-3 grid gap-2 text-sm">
+                  <span className="subtle">Notification Email</span>
+                  <input
+                    type="email"
+                    autoComplete="email"
+                    placeholder="you@example.com"
+                    value={notificationEmail}
+                    onChange={(event) =>
+                      setNotificationEmail(event.target.value)
+                    }
+                    className="h-11 rounded-xl border border-white/15 bg-black/25 px-3 text-white outline-none transition placeholder:text-slate-400 focus:border-rose-300/75 focus:ring-2 focus:ring-rose-300/30"
+                  />
+                </label>
+              ) : null}
+            </div>
           </div>
         ) : null}
 
@@ -584,6 +631,9 @@ export const ActionModal = ({
                   collateralToken: selectedCollateralToken,
                   collateralAmountInput: borrowCollateralAmount,
                   borrowAmountInput: borrowAmount,
+                  notificationEmail: wantsBorrowNotifications
+                    ? notificationEmail.trim()
+                    : undefined,
                 });
                 return;
               }
