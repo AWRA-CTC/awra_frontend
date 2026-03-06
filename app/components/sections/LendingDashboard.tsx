@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Address } from "viem";
 import { usePublicClient } from "wagmi";
 import { ActionModal } from "app/components/lending/ActionModal";
+import { AwraAIAgent } from "app/components/lending/AwraAIAgent";
 import { BorrowedTokenList } from "app/components/lending/BorrowedTokenList";
 import { StatCard } from "app/components/lending/StatCard";
 import { SuppliedTokenList } from "app/components/lending/SuppliedTokenList";
@@ -50,8 +51,11 @@ export const LendingDashboard = () => {
   const publicClient = usePublicClient({ chainId: env.chainId });
 
   const {
+    supportedTokens,
     assetConfigs,
+    userDeposits,
     userLoanIds,
+    userLoans,
     isLoading: contextLoading,
     error: contextError,
     refresh,
@@ -539,6 +543,15 @@ export const LendingDashboard = () => {
             });
           }
         }}
+      />
+
+      <AwraAIAgent
+        isConnected={isConnected}
+        walletAddress={address}
+        supportedTokens={supportedTokens}
+        userDeposits={userDeposits}
+        userLoans={userLoans}
+        assetConfigs={assetConfigs}
       />
     </main>
   );

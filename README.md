@@ -26,6 +26,7 @@ Create a `.env` file (or copy from `.env.example`) and set:
 - `NEXT_PUBLIC_LENDING_POOL_ADDRESS`
 - `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`
 - `NEXT_PUBLIC_NOTIFICATION_SUBSCRIPTION_URL`
+- `NEXT_PUBLIC_AWRA_AI_AGENT_URL`
 - `NEXT_PUBLIC_SUPPORTED_TOKENS`
 - `NEXT_PUBLIC_MINTABLE_TOKENS`
 
@@ -41,6 +42,13 @@ Create a `.env` file (or copy from `.env.example`) and set:
 - `walletAddress` (string)
 - `email` (string)
 - `loanId` (string)
+
+`NEXT_PUBLIC_AWRA_AI_AGENT_URL` should point to your AI backend endpoint that accepts chat requests with:
+
+- `message`
+- `history`
+- `wallet`
+- `context` (supplied tokens, borrowed loans, supported tokens, protocol metadata)
 
 ## Run Locally
 

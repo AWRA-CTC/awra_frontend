@@ -77,11 +77,10 @@ export const env = {
   supportedTokens: parseSupportedTokens(
     process.env.NEXT_PUBLIC_SUPPORTED_TOKENS,
   ),
-  mintableTokens: parseMintableTokens(
-    process.env.NEXT_PUBLIC_MINTABLE_TOKENS,
-  ),
+  mintableTokens: parseMintableTokens(process.env.NEXT_PUBLIC_MINTABLE_TOKENS),
   notificationSubscriptionUrl:
     process.env.NEXT_PUBLIC_NOTIFICATION_SUBSCRIPTION_URL ?? "",
+  awraAiAgentUrl: process.env.NEXT_PUBLIC_AWRA_AI_AGENT_URL ?? "",
 } as const;
 
 export const hasValidLendingPoolAddress =
@@ -92,3 +91,4 @@ export const hasSupportedTokens = env.supportedTokens.length > 0;
 export const hasMintableTokens = env.mintableTokens.length > 0;
 export const hasNotificationSubscriptionUrl =
   env.notificationSubscriptionUrl.trim().length > 0;
+export const hasAwraAiAgentUrl = env.awraAiAgentUrl.trim().length > 0;
