@@ -157,10 +157,9 @@ export const sendAwraAiAgentMessage = async (
   const contentType = response.headers.get("content-type") ?? "";
   if (contentType.toLowerCase().includes("application/json")) {
     const data = (await response.json()) as unknown;
-    console.log("Parsed AI response JSON:", data);
 
     // Access the nested answer field
-    const answer = (data as { data?: { answer?: unknown } })?.data?.answer;
+    const answer = (data as { answer?: unknown })?.answer;
     if (typeof answer === "string" && answer.trim()) {
       return answer.trim();
     }
