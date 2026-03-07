@@ -80,7 +80,7 @@ export const SuppliedTokenList = ({
               </div>
               <div className="flex items-center gap-2">
                 <p className="balance-text text-sm text-white">
-                  {position.amount} {position.symbol}
+                  {position.amount} w{position.symbol}
                 </p>
                 <Button
                   variant="secondary"
